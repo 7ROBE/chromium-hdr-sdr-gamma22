@@ -119,11 +119,27 @@ class RuntimeUpdateTests(unittest.TestCase):
             memory[base + 0x30] = b"unknown!"
             self.assertFalse(hot.module_matches_plan(object(), base, plan))
 
+    def test_in_memory_fallback_selects_verified_loaded_image(self):
+        first = SimpleNamespace(dll=Path("first.dll"))
+        second = SimpleNamespace(dll=Path("second.dll"))
+        plans = {"first": [first], "second": [second]}
+
+        with mock.patch.object(
+            hot, "loaded_image_bases", return_value=[0x1000, 0x2000]
+        ), mock.patch.object(
+            hot,
+            "module_matches_plan",
+            side_effect=lambda _process, base, plan: base == 0x2000 and plan is second,
+        ):
+            match = hot.find_matching_loaded_plan(object(), plans)
+
+        self.assertEqual(match, (0x2000, second))
+
 
 class TrayInterfaceTests(unittest.TestCase):
     def test_about_metadata_is_present(self):
         self.assertEqual(tray.APP_NAME, "Gamma22Tray")
-        self.assertEqual(tray.APP_VERSION, "0.4.0")
+        self.assertEqual(tray.APP_VERSION, "0.4.1")
         self.assertEqual(tray.APP_AUTHOR, "Jaroslav Safar")
         self.assertEqual(tray.APP_EMAIL, "jaroslav.safar.91@gmail.com")
 
@@ -221,6 +237,52 @@ class TrayInterfaceTests(unittest.TestCase):
         self.assertTrue(
             tray.attach_attempt_is_final(1, unsupported_observed=True)
         )
+
+    def test_active_status_requires_verified_browser_and_gpu(self):
+        roles = {10: "browser", 20: "gpu"}
+        common = {
+            "enabled": True,
+            "current": {10, 20},
+            "roles": roles,
+            "active_error": None,
+            "update_pending": False,
+        }
+
+        self.assertEqual(
+            tray.browser_runtime_status(
+                **common, verified=set(), completed={10, 20}
+            ),
+            "not attached",
+        )
+        self.assertEqual(
+            tray.browser_runtime_status(
+                **common, verified={10}, completed={10, 20}
+            ),
+            "partially attached",
+        )
+        self.assertEqual(
+            tray.browser_runtime_status(
+                **common, verified={10, 20}, completed={10, 20}
+            ),
+            "active",
+        )
+
+    def test_unrelated_edge_webview_dll_is_not_a_trusted_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            edge_root = root / "Microsoft" / "Edge" / "Application"
+            webview_root = root / "Microsoft" / "EdgeWebView" / "Application"
+            current = edge_root / "151.0.1.1" / "msedge.dll"
+            updated = edge_root / "151.0.1.2" / "msedge.dll"
+            unrelated = webview_root / "151.0.1.2" / "msedge.dll"
+            for dll in (current, updated, unrelated):
+                dll.parent.mkdir(parents=True, exist_ok=True)
+                dll.write_bytes(dll.parent.name.encode("ascii"))
+            plan = SimpleNamespace(dll=current.resolve())
+            plans = {hot.normalized_path(current.resolve()): [plan]}
+
+            self.assertTrue(hot.observed_dll_is_trusted(updated, plans))
+            self.assertFalse(hot.observed_dll_is_trusted(unrelated, plans))
 
 
 if __name__ == "__main__":

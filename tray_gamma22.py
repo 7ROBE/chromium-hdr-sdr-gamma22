@@ -55,7 +55,7 @@ RESTART_WAIT_ARGUMENT = "--gamma22-restart-after-pid"
 RESTART_PARENT_TIMEOUT_MS = 60_000
 MAX_ATTACH_ATTEMPTS = 3
 APP_NAME = "Gamma22Tray"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 APP_AUTHOR = "Jaroslav Safar"
 APP_EMAIL = "jaroslav.safar.91@gmail.com"
 APP_URL = "https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22"
@@ -412,6 +412,37 @@ def attach_attempt_is_final(attempts: int, *, unsupported_observed: bool) -> boo
     return unsupported_observed or attempts >= MAX_ATTACH_ATTEMPTS
 
 
+def browser_runtime_status(
+    *,
+    enabled: bool,
+    current: set[int],
+    roles: dict[int, str],
+    verified: set[int],
+    completed: set[int],
+    active_error: str | None,
+    update_pending: bool,
+) -> str:
+    if update_pending:
+        return "update settling/restart pending"
+    if not enabled:
+        return "off"
+    if active_error is not None:
+        return "unsupported update"
+    required = {
+        pid for pid in current if roles.get(pid) in {"browser", "gpu"}
+    }
+    if not required:
+        return "waiting" if not current else "detecting processes"
+    verified_current = required & verified
+    verified_roles = {roles[pid] for pid in verified_current}
+    unverified = required - verified_current
+    if not unverified and {"browser", "gpu"}.issubset(verified_roles):
+        return "active"
+    if unverified & completed:
+        return "partially attached" if verified_current else "not attached"
+    return "applying"
+
+
 def set_status(value: str) -> None:
     global current_status
     with status_lock:
@@ -715,6 +746,8 @@ def worker() -> None:
                     "browser": browser,
                     "generations": generations,
                     "completed": completed,
+                    "roles": {},
+                    "verified": set(),
                     "failures": {},
                     "last_update_error": None,
                 }
@@ -739,6 +772,7 @@ def worker() -> None:
             print(f"Switching Gamma 2.2 fix {destination} for all running browsers")
             for target in targets:
                 target["completed"].clear()
+                target["verified"].clear()
                 states[target["name"]] = f"switching {destination}"
             publish_status()
         for target in targets:
@@ -766,18 +800,24 @@ def worker() -> None:
                         )
                 current = set(hot.running_processes_for_executable(browser))
                 target["completed"].intersection_update(current)
+                target["verified"].intersection_update(current)
+                target["roles"] = {
+                    pid: role
+                    for pid, role in target["roles"].items()
+                    if pid in current
+                }
                 if update_restart.pending:
-                    states[name] = "update settling/restart pending"
+                    states[name] = browser_runtime_status(
+                        enabled=enabled,
+                        current=current,
+                        roles=target["roles"],
+                        verified=target["verified"],
+                        completed=target["completed"],
+                        active_error=generations.active_error,
+                        update_pending=True,
+                    )
                     publish_status()
                     continue
-                if generations.active_error is not None:
-                    states[name] = "unsupported update"
-                else:
-                    states[name] = (
-                        "active" if enabled and current
-                        else "waiting" if enabled
-                        else "off"
-                    )
                 for pid in sorted(current - target["completed"]):
                     try:
                         command_line = hot.process_command_line(pid)
@@ -796,6 +836,7 @@ def worker() -> None:
                         # their pristine upstream gamma behavior.
                         target["completed"].add(pid)
                         continue
+                    target["roles"][pid] = role
                     success, detail, observed_dll = hot.attach_one_multi(
                         pid,
                         generations.plans_by_dll,
@@ -804,6 +845,7 @@ def worker() -> None:
                     )
                     if success:
                         target["completed"].add(pid)
+                        target["verified"].add(pid)
                         target["failures"].pop(pid, None)
                         print(f"{name}: new {role} PID {pid}: {detail}")
                         hot.refresh_display_state(current)
@@ -842,6 +884,15 @@ def worker() -> None:
                                 f"{name}: PID {pid} attach attempt {attempts} "
                                 f"deferred ({detail})"
                             )
+                states[name] = browser_runtime_status(
+                    enabled=enabled,
+                    current=current,
+                    roles=target["roles"],
+                    verified=target["verified"],
+                    completed=target["completed"],
+                    active_error=generations.active_error,
+                    update_pending=False,
+                )
             except Exception as error:
                 states[name] = "error"
                 print(f"{name} watcher ERROR: {error}")
