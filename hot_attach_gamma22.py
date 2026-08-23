@@ -50,6 +50,7 @@ PROCESS_COMMAND_LINE_INFORMATION = 60
 ERROR_ALREADY_EXISTS = 183
 MEM_COMMIT = 0x1000
 MEM_PRIVATE = 0x20000
+MEM_IMAGE = 0x1000000
 PAGE_GUARD = 0x100
 PAGE_NOACCESS = 0x01
 WRITABLE_PROTECTIONS = {0x04, 0x08, 0x40, 0x80}
@@ -449,6 +450,81 @@ def module_matches_plan(process, module_base: int, plan) -> bool:
     return True
 
 
+def loaded_image_bases(process) -> list[int]:
+    """Enumerate unique loaded image allocation bases without module handles."""
+    result: list[int] = []
+    seen: set[int] = set()
+    address = 0
+    maximum_user_address = 0x00007FFFFFFFFFFF
+    while address < maximum_user_address:
+        mbi = MEMORY_BASIC_INFORMATION()
+        queried = kernel32.VirtualQueryEx(
+            process,
+            ctypes.c_void_p(address),
+            ctypes.byref(mbi),
+            ctypes.sizeof(mbi),
+        )
+        if not queried:
+            break
+        base = int(mbi.BaseAddress or 0)
+        size = int(mbi.RegionSize)
+        next_address = base + size
+        if next_address <= address:
+            break
+        allocation_base = int(mbi.AllocationBase or 0)
+        if int(mbi.State) == MEM_COMMIT and int(mbi.Type) == MEM_IMAGE:
+            if allocation_base and allocation_base not in seen:
+                seen.add(allocation_base)
+                result.append(allocation_base)
+        address = next_address
+    return result
+
+
+def find_matching_loaded_plan(process, plans_by_dll: dict[str, list]):
+    """Find a verified Chromium module when LOAD_DLL supplied no usable path."""
+    plans = [
+        plan
+        for generation_plans in plans_by_dll.values()
+        for plan in generation_plans
+    ]
+    for module_base in loaded_image_bases(process):
+        for plan in reversed(plans):
+            if module_matches_plan(process, module_base, plan):
+                return module_base, plan
+    return None
+
+
+def apply_plan_to_module(
+    process,
+    pid: int,
+    module_base: int,
+    plan,
+    role: str,
+    *,
+    enabled: bool,
+    restore_live: bool,
+) -> str:
+    patch_state = reconcile_module_for_role(
+        process,
+        pid,
+        module_base,
+        plan,
+        role,
+        enabled=enabled,
+    )
+    live_objects = patch_live_srgb_objects(
+        process,
+        pid,
+        restore=(restore_live or not enabled or role != "gpu"),
+    )
+    if live_objects:
+        patch_state += (
+            f"; {'restored' if restore_live or not enabled or role != 'gpu' else 'patched'} "
+            f"{len(live_objects)} live cached sRGB object(s)"
+        )
+    return f"generation={plan.dll.parent.name}/{plan.dll_hash[:12]}, {patch_state}"
+
+
 def matching_plans_for_module(process, module_base: int, plans) -> list:
     """Select structurally valid plans for a module whose file handle is absent."""
     return [
@@ -456,6 +532,38 @@ def matching_plans_for_module(process, module_base: int, plans) -> list:
         for plan in plans
         if module_matches_plan(process, module_base, plan)
     ]
+
+
+def observed_dll_is_trusted(
+    loaded_path: Path, plans_by_dll: dict[str, list]
+) -> bool:
+    """Accept replacement generations only inside the verified browser tree."""
+    try:
+        candidate = loaded_path.resolve(strict=True)
+    except OSError:
+        return False
+    for generation_plans in plans_by_dll.values():
+        for plan in generation_plans:
+            try:
+                expected = Path(plan.dll).resolve(strict=True)
+            except OSError:
+                continue
+            if candidate.name.lower() != expected.name.lower():
+                continue
+            version_parts = expected.parent.name.split(".")
+            version_directory = (
+                len(version_parts) >= 2
+                and all(part.isdigit() for part in version_parts)
+            )
+            trusted_root = (
+                expected.parent.parent if version_directory else expected.parent
+            )
+            try:
+                candidate.relative_to(trusted_root)
+                return True
+            except ValueError:
+                continue
+    return False
 
 
 def attach_one_multi(
@@ -495,10 +603,20 @@ def attach_one_multi(
             continue_status = DBG_CONTINUE
             file_to_close = None
             thread_to_close = None
+            process_to_close = None
             saw_initial_breakpoint = False
             try:
                 if event_pid != pid:
-                    failure = f"received an event for unexpected PID {event_pid}"
+                    # Debug events are queued per debugger thread. A late event
+                    # from a previously attached Chromium/WebView process must
+                    # be continued and ignored, not attributed to this target.
+                    if event.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT:
+                        info = event.CreateProcessInfo
+                        process_to_close = info.hProcess
+                        file_to_close = info.hFile
+                        thread_to_close = info.hThread
+                    elif event.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT:
+                        file_to_close = event.LoadDll.hFile
                 elif event.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT:
                     info = event.CreateProcessInfo
                     process_handle = info.hProcess
@@ -515,6 +633,7 @@ def attach_one_multi(
                         if (
                             not candidates
                             and loaded_path.name.lower() in {"chrome.dll", "msedge.dll"}
+                            and observed_dll_is_trusted(loaded_path, plans_by_dll)
                         ):
                             observed_dll = loaded_path
                     if candidates and process_handle:
@@ -546,36 +665,37 @@ def attach_one_multi(
                         # When two cached generations are byte-for-byte layout
                         # compatible either is safe; prefer the newest inserted.
                         plan = candidates[-1]
-                        patch_state = reconcile_module_for_role(
+                        patch_state = apply_plan_to_module(
                             process_handle,
                             pid,
                             int(info.lpBaseOfDll),
                             plan,
                             role,
                             enabled=enabled,
-                        )
-                        # The canonical live object belongs only to the GPU
-                        # correction stage. Restore any objects modified by
-                        # older experimental all-process builds elsewhere.
-                        live_objects = patch_live_srgb_objects(
-                            process_handle,
-                            pid,
-                            restore=(restore_live or not enabled or role != "gpu"),
-                        )
-                        if live_objects:
-                            patch_state += (
-                                f"; {'restored' if restore_live or not enabled or role != 'gpu' else 'patched'} "
-                                f"{len(live_objects)} live cached sRGB object(s)"
-                            )
-                        patch_state = (
-                            f"generation={plan.dll.parent.name}/{plan.dll_hash[:12]}, "
-                            f"{patch_state}"
+                            restore_live=restore_live,
                         )
                         patched = True
                 elif event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT:
                     code = int(event.Exception.ExceptionRecord.ExceptionCode)
                     if code == EXCEPTION_BREAKPOINT:
                         continue_status = DBG_CONTINUE
+                        if not patched and process_handle:
+                            fallback = find_matching_loaded_plan(
+                                process_handle, plans_by_dll
+                            )
+                            if fallback is not None:
+                                module_base, plan = fallback
+                                patch_state = apply_plan_to_module(
+                                    process_handle,
+                                    pid,
+                                    module_base,
+                                    plan,
+                                    role,
+                                    enabled=enabled,
+                                    restore_live=restore_live,
+                                )
+                                patch_state += "; located by in-memory image scan"
+                                patched = True
                         saw_initial_breakpoint = True
                     else:
                         continue_status = DBG_EXCEPTION_NOT_HANDLED
@@ -586,6 +706,7 @@ def attach_one_multi(
             finally:
                 close_handle(file_to_close)
                 close_handle(thread_to_close)
+                close_handle(process_to_close)
                 if not kernel32.ContinueDebugEvent(event_pid, tid, continue_status):
                     failure = str(win_error("ContinueDebugEvent"))
 
