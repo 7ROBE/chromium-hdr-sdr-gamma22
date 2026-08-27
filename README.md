@@ -11,6 +11,11 @@ Portable or isolated browser copies are not required. Gamma22Tray runs in the
 Windows notification area and applies the correction only in process memory;
 it does not modify Chrome or Edge files on disk.
 
+> **Real-world testing update — 27 August 2026:** The project author has
+> confirmed continued functionality after several updates of **both Chrome
+> and Edge**, with automatic recovery of the correction and no manual
+> repatching. See [Browser updates](#browser-updates) for compatibility limits.
+
 > **Free and open source, forever.** You may use, share, modify and redistribute
 > this MIT-licensed project at no cost. If it improves your Windows HDR setup,
 > you can optionally [buy me a coffee ☕](https://buymeacoffee.com/mrsaliericze).
@@ -66,10 +71,14 @@ seconds. When it recognizes a compatible update, it:
 3. safely restarts itself,
 4. attaches to the current browser generation.
 
-The mechanism has been verified during real Chrome and Edge updates: the fix
-resumed after several seconds without manual intervention. Compatibility with
-every future Chromium layout cannot be guaranteed; unfamiliar layouts fail
-closed and are reported in the diagnostic log.
+As of **27 August 2026**, the project author's everyday testing has confirmed
+continued functionality through **multiple successive updates of both Chrome
+and Edge**. The correction resumed automatically after the updates, without
+manual intervention or repatching.
+
+This confirms compatibility with the updates tested so far, not every future
+Chromium layout. Unfamiliar layouts still fail closed and are reported in the
+diagnostic log.
 
 ## Start with Windows
 
