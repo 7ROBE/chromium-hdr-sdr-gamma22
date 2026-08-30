@@ -5,7 +5,7 @@ Google Chrome and Microsoft Edge** while Windows HDR is enabled. It keeps the
 browsers on their native HDR/scRGB presentation path but interprets ordinary
 BT.709/sRGB SDR content using pure gamma 2.2.
 
-> **[Download Gamma22Tray v0.4.1](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest)**
+> **[Download Gamma22Tray v0.4.2](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest)**
 
 Portable or isolated browser copies are not required. Gamma22Tray runs in the
 Windows notification area and applies the correction only in process memory;
@@ -15,6 +15,11 @@ it does not modify Chrome or Edge files on disk.
 > confirmed continued functionality after several updates of **both Chrome
 > and Edge**, with automatic recovery of the correction and no manual
 > repatching. See [Browser updates](#browser-updates) for compatibility limits.
+
+> **Edge 152 compatibility update — 30 August 2026:** If an older Gamma22Tray
+> reports **Unsupported/Error** after updating to Edge `152.0.4191.53`, install
+> v0.4.2. This release supports its changed layout while retaining Edge 151
+> compatibility.
 
 > **Free and open source, forever.** You may use, share, modify and redistribute
 > this MIT-licensed project at no cost. If it improves your Windows HDR setup,
@@ -76,6 +81,12 @@ continued functionality through **multiple successive updates of both Chrome
 and Edge**. The correction resumed automatically after the updates, without
 manual intervention or repatching.
 
+Edge `152.0.4191.53` subsequently changed the recognized singleton layout from
+98 to 97 sRGB initializers. Gamma22Tray v0.4.2 adds support for this layout and
+checks that every associated sRGB load and singleton store is accounted for.
+Older Gamma22Tray versions safely report **Unsupported/Error** for this Edge
+build and need to be updated; restarting the old patcher alone will not help.
+
 This confirms compatibility with the updates tested so far, not every future
 Chromium layout. Unfamiliar layouts still fail closed and are reported in the
 diagnostic log.
@@ -131,7 +142,7 @@ Gamma22Tray is unsigned and necessarily uses Windows debugger attachment and
 process-memory writes. Antivirus products can classify those behaviors as
 suspicious even when the program was built from this published source.
 
-The v0.4.1 release uses an unpacked **onedir** package because the earlier
+The current release uses an unpacked **onedir** package because the earlier
 self-extracting one-file beta triggered Windows Defender heuristics. It also
 limits failed debugger attachments and skips incompatible WebView processes to
 avoid retry storms.
@@ -183,7 +194,7 @@ publishes its SHA-256 together with the exact source commit.
 - Author: Jaroslav Safar
 - Contact: `jaroslav.safar.91@gmail.com`
 - License: [MIT](LICENSE)
-- Current release: [Gamma22Tray v0.4.1](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.1)
+- Current release: [Gamma22Tray v0.4.2](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.2)
 
 Historical documentation for the retired version-specific workflows is kept
 in [`archive/LEGACY_VERSION_SPECIFIC_PATCHER.md`](archive/LEGACY_VERSION_SPECIFIC_PATCHER.md).

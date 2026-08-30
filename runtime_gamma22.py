@@ -64,6 +64,10 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 MAX_PATH = 260
 ULONG_PTR = ctypes.c_size_t
 
+# Verified layouts: Edge 151.0.4129.107 has 98; Edge 152.0.4191.53 has 97.
+# A known count is only one check, not permission to skip structural validation.
+EDGE_SINGLETON_INITIALIZER_COUNTS = frozenset({97, 98})
+
 
 class STARTUPINFOW(ctypes.Structure):
     _fields_ = [
@@ -523,11 +527,14 @@ def discover_edge_runtime_layout(dll: Path) -> dict:
         return text_rva + position + size + displacement
 
     constructors: list[tuple[int, int, int]] = []
+    srgb_load_rvas: set[int] = set()
     position = 0
     while True:
         position = text.find(b"\x48\x8D\x0D", position)
         if position < 0:
             break
+        if position + 7 <= len(text) and rip_target(position, 3, 7) == srgb_rva:
+            srgb_load_rvas.add(text_rva + position)
         if (
             position + 26 <= len(text)
             and text[position + 7 : position + 10] == b"\x48\x8D\x15"
@@ -545,12 +552,37 @@ def discover_edge_runtime_layout(dll: Path) -> dict:
             )
         position += 1
     constructor_tuples = {(factory, pointer) for _rva, factory, pointer in constructors}
-    if len(constructors) != 98 or len(constructor_tuples) != 1:
+    if (
+        len(constructors) not in EDGE_SINGLETON_INITIALIZER_COUNTS
+        or len(constructor_tuples) != 1
+    ):
         raise PatchError(
             "Unexpected Edge singleton constructors: "
             f"{len(constructors)} initializer(s), {len(constructor_tuples)} factory/pointer tuple(s)"
         )
     singleton_factory_rva, singleton_pointer_rva = constructor_tuples.pop()
+
+    # Accepting both counts must not turn a partially recognized 98-initializer
+    # layout into an apparently valid 97-initializer layout. Account for every
+    # load of this canonical sRGB constant and every store to its singleton.
+    if srgb_load_rvas != {rva for rva, _factory, _pointer in constructors}:
+        raise PatchError("Unrecognized Edge sRGB singleton initializer load")
+    singleton_store_rvas: set[int] = set()
+    position = 0
+    while True:
+        position = text.find(b"\x48\x89\x05", position)
+        if position < 0:
+            break
+        if (
+            position + 7 <= len(text)
+            and rip_target(position, 3, 7) == singleton_pointer_rva
+        ):
+            singleton_store_rvas.add(text_rva + position)
+        position += 1
+    if singleton_store_rvas != {
+        rva + 19 for rva, _factory, _pointer in constructors
+    }:
+        raise PatchError("Unrecognized Edge sRGB singleton initializer store")
 
     loop_candidates: list[tuple[int, int, int, bytes]] = []
     loop_prefix = b"\x45\x31\xC0\x4C\x8D\x8C\x24"
