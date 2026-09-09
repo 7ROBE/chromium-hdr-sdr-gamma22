@@ -25,14 +25,11 @@ BACKUP_SUFFIX = ".gamma22-original"
 PATCH_KIND_LOADS_TRAMPOLINE = "loads-trampoline"
 PATCH_KIND_EDGE_SINGLETON_USAGE_TABLE = "edge-singleton-usage-table"
 
-# Stable machine-code context around ScreenWin's first
-# SetOutputBufferFormats(ContentColorUsage::kWideColorGamut, ...) call.  The
-# five bytes immediately before the call are replaced by the trampoline hook.
-HDR_OUTPUT_HOOK_CONTEXT = bytes.fromhex(
-    "48 8D 8C 24 30 02 00 00 4C 8D 8C 24 60 06 00 00 "
-    "B2 01 45 31 C0 E8"
-)
-HDR_OUTPUT_HOOK_OFFSET = 16
+# The five argument-setup bytes immediately before ScreenWin's first
+# SetOutputBufferFormats(ContentColorUsage::kWideColorGamut, ...) call are
+# replaced by the trampoline hook. Chrome 153 changed only the stack-frame
+# offsets of the preceding RCX/R9 LEAs, so discovery validates their structure
+# and exact call target rather than hard-coding those two offsets.
 HDR_OUTPUT_HOOK_ORIGINAL = bytes.fromhex("B2 01 45 31 C0")
 
 # This exact helper signature is deliberately strict.  It is the small method
@@ -288,6 +285,56 @@ def find_all_rvas(
     return found
 
 
+def find_chrome_hdr_output_hook_in_text(
+    text: bytes, text_rva: int
+) -> tuple[int, int]:
+    """Return the unique ScreenWin hook and exact output-helper RVAs."""
+    helper_positions: list[int] = []
+    position = 0
+    while True:
+        position = text.find(HDR_OUTPUT_HELPER_BYTES, position)
+        if position < 0:
+            break
+        helper_positions.append(position)
+        position += 1
+    if len(helper_positions) != 1:
+        raise PatchError(
+            "Runtime discovery expected one ScreenWin output helper, "
+            f"found {len(helper_positions)}"
+        )
+    helper_rva = text_rva + helper_positions[0]
+
+    hook_rvas: list[int] = []
+    position = 0
+    while True:
+        position = text.find(b"\xE8", position)
+        if position < 0:
+            break
+        if position >= 21 and position + 5 <= len(text):
+            call_target = (
+                text_rva
+                + position
+                + 5
+                + struct.unpack_from("<i", text, position + 1)[0]
+            )
+            rcx_argument = text[position - 21 : position - 13]
+            r9_argument = text[position - 13 : position - 5]
+            if (
+                call_target == helper_rva
+                and rcx_argument[:4] == b"\x48\x8D\x8C\x24"
+                and r9_argument[:4] == b"\x4C\x8D\x8C\x24"
+                and text[position - 5 : position] == HDR_OUTPUT_HOOK_ORIGINAL
+            ):
+                hook_rvas.append(text_rva + position - 5)
+        position += 1
+    if len(hook_rvas) != 1:
+        raise PatchError(
+            "Runtime discovery expected one ScreenWin HDR output hook, "
+            f"found {len(hook_rvas)}"
+        )
+    return hook_rvas[0], helper_rva
+
+
 def discover_chrome_runtime_layout(path: Path) -> dict:
     """Discover the Chrome gamma and HDR output patch points structurally.
 
@@ -341,37 +388,16 @@ def discover_chrome_runtime_layout(path: Path) -> dict:
             f"group, found {len(candidates)}"
         )
 
-    hook_positions: list[int] = []
-    position = 0
-    while True:
-        position = text.find(HDR_OUTPUT_HOOK_CONTEXT, position)
-        if position < 0:
-            break
-        hook_positions.append(position)
-        position += 1
-    if len(hook_positions) != 1:
-        raise PatchError(
-            "Runtime discovery expected one ScreenWin HDR output hook, "
-            f"found {len(hook_positions)}"
-        )
-
-    hook_rva = text_rva + hook_positions[0] + HDR_OUTPUT_HOOK_OFFSET
+    hook_rva, helper_rva = find_chrome_hdr_output_hook_in_text(text, text_rva)
     resume_rva = hook_rva + len(HDR_OUTPUT_HOOK_ORIGINAL)
     call_offset = resume_rva - text_rva
     if text[call_offset] != 0xE8:
         raise PatchError("ScreenWin hook is not followed by the expected call")
     call_displacement = struct.unpack_from("<i", text, call_offset + 1)[0]
-    helper_rva = resume_rva + 5 + call_displacement
-    with path.open("rb") as stream:
-        helper = read_at(
-            stream,
-            rva_to_offset(sections, helper_rva),
-            len(HDR_OUTPUT_HELPER_BYTES),
-        )
-    if helper != HDR_OUTPUT_HELPER_BYTES:
-        raise PatchError("ScreenWin output helper does not match the safe signature")
+    if resume_rva + 5 + call_displacement != helper_rva:
+        raise PatchError("ScreenWin output call target changed during discovery")
 
-    # Chrome 150-152 each contain one exact 97-byte INT3 padding run.  The
+    # Chrome 150-153 each contain one exact 97-byte INT3 padding run.  The
     # audited disk recipes use the aligned final 96 bytes of that same run.
     # Requiring the exact bounded run avoids choosing arbitrary function
     # padding merely because it happens to be large enough.

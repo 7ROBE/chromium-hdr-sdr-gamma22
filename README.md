@@ -5,7 +5,7 @@ Google Chrome and Microsoft Edge** while Windows HDR is enabled. It keeps the
 browsers on their native HDR/scRGB presentation path but interprets ordinary
 BT.709/sRGB SDR content using pure gamma 2.2.
 
-> **[Download Gamma22Tray v0.4.2](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest)**
+> **[Download Gamma22Tray v0.4.3](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest)**
 
 Portable or isolated browser copies are not required. Gamma22Tray runs in the
 Windows notification area and applies the correction only in process memory;
@@ -20,6 +20,12 @@ it does not modify Chrome or Edge files on disk.
 > reports **Unsupported/Error** after updating to Edge `152.0.4191.53`, install
 > v0.4.2. This release supports its changed layout while retaining Edge 151
 > compatibility.
+
+> **Chrome 153 compatibility update — 9 September 2026:** Chrome
+> `153.0.8010.37` changed stack-frame offsets around its HDR output setup.
+> Gamma22Tray v0.4.3 discovers that hook structurally and supports the new
+> layout while retaining compatibility with the verified Chrome 151 and 152
+> layouts.
 
 > **Free and open source, forever.** You may use, share, modify and redistribute
 > this MIT-licensed project at no cost. If it improves your Windows HDR setup,
@@ -86,6 +92,13 @@ Edge `152.0.4191.53` subsequently changed the recognized singleton layout from
 checks that every associated sRGB load and singleton store is accounted for.
 Older Gamma22Tray versions safely report **Unsupported/Error** for this Edge
 build and need to be updated; restarting the old patcher alone will not help.
+
+Chrome `153.0.8010.37` changed two stack-frame offsets immediately before its
+HDR output helper call. Gamma22Tray v0.4.3 no longer identifies this location
+using those fixed offsets. It instead requires a unique verified helper,
+direct call target, argument-setup structure and original hook bytes. The
+updated discovery was tested against unmodified Chrome 151, 152 and 153 DLLs;
+unknown or ambiguous layouts are still rejected before any write occurs.
 
 This confirms compatibility with the updates tested so far, not every future
 Chromium layout. Unfamiliar layouts still fail closed and are reported in the
@@ -194,7 +207,7 @@ publishes its SHA-256 together with the exact source commit.
 - Author: Jaroslav Safar
 - Contact: `jaroslav.safar.91@gmail.com`
 - License: [MIT](LICENSE)
-- Current release: [Gamma22Tray v0.4.2](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.2)
+- Current release: [Gamma22Tray v0.4.3](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.3)
 
 Historical documentation for the retired version-specific workflows is kept
 in [`archive/LEGACY_VERSION_SPECIFIC_PATCHER.md`](archive/LEGACY_VERSION_SPECIFIC_PATCHER.md).
