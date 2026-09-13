@@ -9,6 +9,7 @@ try {
         --clean `
         --onedir `
         --noupx `
+        --collect-all capstone `
         --noconsole `
         --icon "$projectRoot\assets\gamma22.ico" `
         --add-data "$projectRoot\assets\gamma22.ico;assets" `
