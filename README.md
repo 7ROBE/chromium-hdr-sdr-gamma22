@@ -5,27 +5,23 @@ Google Chrome and Microsoft Edge** while Windows HDR is enabled. It keeps the
 browsers on their native HDR/scRGB presentation path but interprets ordinary
 BT.709/sRGB SDR content using pure gamma 2.2.
 
-> **[Download Gamma22Tray v0.4.3](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest)**
+> **[Download Gamma22Tray v0.5.0-beta.1 — Edge 153 support](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.5.0-beta.1)**
 
 Portable or isolated browser copies are not required. Gamma22Tray runs in the
 Windows notification area and applies the correction only in process memory;
 it does not modify Chrome or Edge files on disk.
 
-> **Real-world testing update — 27 August 2026:** The project author has
-> confirmed continued functionality after several updates of **both Chrome
-> and Edge**, with automatic recovery of the correction and no manual
-> repatching. See [Browser updates](#browser-updates) for compatibility limits.
+> **New beta — 13 September 2026:** Fixes **Unsupported/Error** with Edge
+> `153.0.4234.32`. The new Edge output analyzer decodes x64 instructions and
+> follows arguments and branches, allowing verified changes in registers,
+> stack offsets and code placement instead of requiring one exact byte pattern.
+> The author has confirmed correct SDR, Display-P3 and HDR video rendering in
+> everyday testing. Its resilience through future browser updates still needs
+> real-world testing; this is not a promise of support for every future version.
 
-> **Edge 152 compatibility update — 30 August 2026:** If an older Gamma22Tray
-> reports **Unsupported/Error** after updating to Edge `152.0.4191.53`, install
-> v0.4.2. This release supports its changed layout while retaining Edge 151
-> compatibility.
-
-> **Chrome 153 compatibility update — 9 September 2026:** Chrome
-> `153.0.8010.37` changed stack-frame offsets around its HDR output setup.
-> Gamma22Tray v0.4.3 discovers that hook structurally and supports the new
-> layout while retaining compatibility with the verified Chrome 151 and 152
-> layouts.
+Chrome support from v0.4.3 is retained. The new analyzer specifically addresses
+Edge's changed HDR output loop. See [Browser updates](#browser-updates) for the
+remaining compatibility checks.
 
 > **Free and open source, forever.** You may use, share, modify and redistribute
 > this MIT-licensed project at no cost. If it improves your Windows HDR setup,
@@ -51,7 +47,7 @@ The correction is deliberately limited to ordinary SDR BT.709/sRGB content:
 ## Install and run
 
 1. Download `Gamma22Tray-win64.zip` from the
-   [latest release](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/latest).
+   [v0.5.0-beta.1 release](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.5.0-beta.1).
 2. Extract the **complete `Gamma22Tray` folder** to a permanent location.
 3. Keep `Gamma22Tray.exe` beside its `_internal` folder. Copying the EXE alone
    will cause a missing Python DLL error.
@@ -103,6 +99,31 @@ unknown or ambiguous layouts are still rejected before any write occurs.
 This confirms compatibility with the updates tested so far, not every future
 Chromium layout. Unfamiliar layouts still fail closed and are reported in the
 diagnostic log.
+
+### More resilient Edge output analysis (v0.5.0 beta)
+
+Edge `153.0.4234.32` moved output setup into a split code block and changed how
+registers carry the usage table and output arguments. The previous byte pattern
+could no longer identify it even though the 97 sRGB initializers still matched.
+
+The beta adds a bounded instruction analyzer using Capstone. When the existing
+Edge output pattern does not match, it uses PE function boundaries, identifies
+the exact known output helper, and checks both supported control-flow paths.
+It traces the usage-table value and output arguments, verifies the loop limit,
+and verifies the analyzed function bytes again in the loaded process before
+applying the correction. Unsupported instructions and ambiguous candidates are
+rejected.
+
+Tests cover changed stack offsets and loop registers, plus invalid calls,
+tables, counters, arguments and branches. Read-only validation also passed for
+the available original Edge 151 and Chrome 153 DLLs. Live inspection of two
+Edge 153 browser/GPU pairs confirmed the intended role-specific changes, and
+the author confirmed the visual result.
+
+This improves tolerance of the supported compiler variations. It does not
+remove the existing 97/98 Edge initializer-count checks, the exact output-helper
+check or all other layout constraints. A different rendering implementation
+can still require an update to Gamma22Tray.
 
 ## Start with Windows
 
@@ -181,6 +202,7 @@ Install Python 3.9 or newer and PyInstaller, then run:
 
 ```powershell
 python -m pip install pyinstaller
+python -m pip install -r requirements.txt
 .\build_hot_attach_exe.ps1
 ```
 
@@ -207,7 +229,8 @@ publishes its SHA-256 together with the exact source commit.
 - Author: Jaroslav Safar
 - Contact: `jaroslav.safar.91@gmail.com`
 - License: [MIT](LICENSE)
-- Current release: [Gamma22Tray v0.4.3](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.3)
+- Recommended test release: [Gamma22Tray v0.5.0-beta.1](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.5.0-beta.1)
+- Previous stable release: [Gamma22Tray v0.4.3](https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22/releases/tag/v0.4.3) (does not support the new Edge 153 output layout)
 
 Historical documentation for the retired version-specific workflows is kept
 in [`archive/LEGACY_VERSION_SPECIFIC_PATCHER.md`](archive/LEGACY_VERSION_SPECIFIC_PATCHER.md).

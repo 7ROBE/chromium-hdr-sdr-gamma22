@@ -627,6 +627,13 @@ def discover_edge_runtime_layout(dll: Path) -> dict:
             table = stream.read(3)
         if table == b"\x01\x02\x00":
             loop_candidates.append((loop_rva, table_rva, call1_target, candidate))
+    if not loop_candidates:
+        from edge_output_analysis import find_split_output_loop
+        semantic = find_split_output_loop(dll, sections, text, text_rva)
+        loop_candidates.append((semantic['loop_limit_rva'], semantic['usage_table_rva'],
+                                semantic['output_helper_rva'], semantic['loop_context']))
+    else:
+        semantic = {}
     if len(loop_candidates) != 1:
         raise PatchError(
             f"Expected one strict Edge SDR/WCG/HDR output loop; found {len(loop_candidates)}"
@@ -647,6 +654,7 @@ def discover_edge_runtime_layout(dll: Path) -> dict:
         "usage_table_rva": usage_table_rva,
         "output_helper_rva": output_helper_rva,
         "loop_context": loop_context,
+        **semantic,
     }
 
 
@@ -670,12 +678,12 @@ def make_edge_runtime_plan(dll: Path) -> RuntimePlan:
                 )
             )
         loop_original = read_at(
-            stream, rva_to_offset(sections, layout["loop_limit_rva"]), 4
+            stream, rva_to_offset(sections, layout["loop_limit_rva"]), len(layout.get('loop_original', b'\x48\x83\xFF\x02'))
         )
         table_original = read_at(
             stream, rva_to_offset(sections, layout["usage_table_rva"]), 3
         )
-    if loop_original != b"\x48\x83\xFF\x02" or table_original != b"\x01\x02\x00":
+    if loop_original != layout.get('loop_original', b"\x48\x83\xFF\x02") or table_original != b"\x01\x02\x00":
         raise PatchError("Edge ScreenWin output state is not pristine")
     writes.extend(
         (
@@ -683,7 +691,7 @@ def make_edge_runtime_plan(dll: Path) -> RuntimePlan:
                 "ScreenWin usage loop limit",
                 layout["loop_limit_rva"],
                 loop_original,
-                b"\x48\x83\xFF\x03",
+                layout.get('loop_patched', b"\x48\x83\xFF\x03"),
             ),
             MemoryWrite(
                 "ScreenWin usage table",
@@ -699,6 +707,7 @@ def make_edge_runtime_plan(dll: Path) -> RuntimePlan:
         ("gamma 2.2 transfer", layout["gamma22_transfer_rva"], GAMMA22_TRANSFER_FUNCTION),
         ("ScreenWin output helper", layout["output_helper_rva"], HDR_OUTPUT_HELPER_BYTES),
     ]
+    checks.extend(layout.get('semantic_checks', []))
     return RuntimePlan(dll, sha256(dll), layout, checks, writes)
 
 
