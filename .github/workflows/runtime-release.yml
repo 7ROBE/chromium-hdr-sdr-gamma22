@@ -59,7 +59,7 @@ jobs:
             "release", "create", $tag,
             "$asset#Gamma22Tray-win64.zip",
             "--verify-tag",
-            "--title", "Gamma22Tray $tag - Chrome and Edge runtime release",
+            "--title", "Gamma22Tray $tag - Chrome, Edge and Brave runtime release",
             "--notes-file", $notes
           )
           if ($tag -match "-") {
