@@ -55,7 +55,7 @@ RESTART_WAIT_ARGUMENT = "--gamma22-restart-after-pid"
 RESTART_PARENT_TIMEOUT_MS = 60_000
 MAX_ATTACH_ATTEMPTS = 3
 APP_NAME = "Gamma22Tray"
-APP_VERSION = "0.5.0-beta.1"
+APP_VERSION = "0.6.0"
 APP_AUTHOR = "Jaroslav Safar"
 APP_EMAIL = "jaroslav.safar.91@gmail.com"
 APP_URL = "https://github.com/mrsaliericz/chromium-hdr-sdr-gamma22"
@@ -558,8 +558,8 @@ def show_about() -> None:
         (
             f"{APP_NAME}\n"
             f"Version {APP_VERSION}\n\n"
-            "Windows HDR SDR gamma 2.2 runtime fix for Google Chrome "
-            "and Microsoft Edge.\n\n"
+            "Windows HDR SDR gamma 2.2 runtime fix for Google Chrome, "
+            "Microsoft Edge and Brave.\n\n"
             f"Author: {APP_AUTHOR}\n"
             f"Contact: {APP_EMAIL}\n\n"
             f"{APP_URL}\n\n"
@@ -703,6 +703,15 @@ def worker() -> None:
             (
                 Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
                 Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+            ),
+        ),
+        (
+            "Brave",
+            (
+                Path(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                Path(r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+                / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe",
             ),
         ),
     )
